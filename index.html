@@ -3,339 +3,337 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>AI PDF Reader & Admin Panel</title>
-    <!-- Tailwind CSS -->
+    <title>AI PDF Voice Pro - Admin & Reader</title>
     <script src="https://cdn.tailwindcss.com"></script>
-    <!-- React & Babel -->
     <script src="https://unpkg.com/react@18/umd/react.development.js"></script>
     <script src="https://unpkg.com/react-dom@18/umd/react-dom.development.js"></script>
     <script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
-    <!-- Lucide Icons -->
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.4.120/pdf.min.js"></script>
     <script src="https://unpkg.com/lucide@latest"></script>
     <style>
-        body { font-family: 'Inter', sans-serif; }
-        .pdf-viewer-area { height: calc(100vh - 280px); width: 100%; position: relative; background: #111827; border-radius: 16px; overflow: hidden; }
-        iframe { width: 100%; height: 100%; border: none; background: white; }
-        .custom-scrollbar::-webkit-scrollbar { width: 6px; }
-        .custom-scrollbar::-webkit-scrollbar-thumb { background: #374151; border-radius: 10px; }
-        .playing-indicator { animation: pulse 2s cubic-bezier(0.4, 0, 0.6, 1) infinite; }
-        @keyframes pulse { 0%, 100% { opacity: 1; } 50% { opacity: .5; } }
+        @import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;600;900&display=swap');
+        body { font-family: 'Inter', sans-serif; background-color: #020617; color: white; overflow: hidden; }
+        
+        .pdf-view-area {
+            flex: 1;
+            overflow: auto;
+            background: #0f172a;
+            border-radius: 2rem;
+            display: flex;
+            justify-content: center;
+            padding: 2.5rem;
+            border: 1px solid #1e293b;
+            box-shadow: inset 0 0 50px rgba(0,0,0,0.5);
+        }
+
+        canvas { 
+            box-shadow: 0 40px 80px -15px rgba(0, 0, 0, 0.9);
+            background: white;
+            border-radius: 4px;
+        }
+
+        .custom-scroll::-webkit-scrollbar { width: 8px; }
+        .custom-scroll::-webkit-scrollbar-thumb { background: #334155; border-radius: 10px; }
+        
+        .glass-panel { background: rgba(15, 23, 42, 0.7); backdrop-filter: blur(20px); border: 1px solid rgba(255,255,255,0.05); }
+        
+        .active-glow { border-left: 8px solid #3b82f6; background: linear-gradient(90deg, rgba(59, 130, 246, 0.1) 0%, transparent 100%); }
+        
+        .shimmer { background: linear-gradient(90deg, #1e293b 0%, #334155 50%, #1e293b 100%); background-size: 200% 100%; animation: shimmer 2s infinite; }
+        @keyframes shimmer { 0% { background-position: -200% 0; } 100% { background-position: 200% 0; } }
     </style>
 </head>
 <body>
     <div id="root"></div>
 
     <script type="text/babel">
-        const { useState, useEffect, useRef } = React;
-        
-        const Icons = {
-            FileText: () => <i data-lucide="file-text"></i>,
-            Users: () => <i data-lucide="users"></i>,
-            Settings: () => <i data-lucide="settings"></i>,
-            LogOut: () => <i data-lucide="log-out"></i>,
-            Moon: () => <i data-lucide="moon"></i>,
-            Sun: () => <i data-lucide="sun"></i>,
-            ChevronLeft: () => <i data-lucide="chevron-left"></i>,
-            ChevronRight: () => <i data-lucide="chevron-right"></i>,
-            Menu: () => <i data-lucide="menu"></i>,
-            Plus: () => <i data-lucide="plus"></i>,
-            Trash2: () => <i data-lucide="trash-2"></i>,
-            Play: () => <i data-lucide="play"></i>,
-            Square: () => <i data-lucide="square"></i>,
-            User: () => <i data-lucide="user"></i>,
-            Key: () => <i data-lucide="key"></i>,
-            Save: () => <i data-lucide="save"></i>,
-            ArrowLeft: () => <i data-lucide="arrow-left"></i>,
-            X: () => <i data-lucide="x"></i>,
-            Camera: () => <i data-lucide="camera"></i>,
-            Volume2: () => <i data-lucide="volume-2"></i>,
-            Cpu: () => <i data-lucide="cpu"></i>,
-            Loader: () => <i data-lucide="loader" className="animate-spin"></i>
-        };
+        const { useState, useEffect, useRef, useMemo } = React;
+        pdfjsLib.GlobalWorkerOptions.workerSrc = 'https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.4.120/pdf.worker.min.js';
+
+        // Icons implementation
+        const Icon = ({ name, className = "w-5 h-5" }) => <i data-lucide={name} className={className}></i>;
 
         function App() {
             const [user, setUser] = useState(null);
-            const [isDarkMode, setIsDarkMode] = useState(true);
-            const [isSidebarCollapsed, setIsSidebarCollapsed] = useState(false);
             const [currentPage, setCurrentPage] = useState('login');
-            const [loginData, setLoginData] = useState({ username: '', password: '' });
-            
+            const [isSidebarCollapsed, setIsSidebarCollapsed] = useState(false);
             const [pdfs, setPdfs] = useState([
-                { id: 1, title: 'Sample Guide.pdf', url: 'https://pdfobject.com/pdf/sample.pdf' }
+                { id: 1, title: 'Guide.pdf', url: 'https://raw.githubusercontent.com/mozilla/pdf.js/ba2cced/web/compressed.tracemonkey-pldi-09.pdf' }
             ]);
             const [users, setUsers] = useState([
-                { id: 'user1', name: 'Rahul', password: '123', role: 'user', allowedPdfs: [1], photo: null }
+                { id: 'u1', name: 'Vivek', password: '123', role: 'user', allowedPdfs: [1] }
             ]);
             
-            const [config, setConfig] = useState({ apiKey: '', selectedModel: 'Gemini 1.5 Flash' });
+            // API Settings State
+            const [apiConfig, setApiConfig] = useState({ key: '', model: 'gemini-1.5-pro' });
+            
+            // Reader State
             const [activePdf, setActivePdf] = useState(null);
             const [pdfPage, setPdfPage] = useState(1);
+            const [numPages, setNumPages] = useState(0);
+            const [zoom, setZoom] = useState(1.8);
             const [isReading, setIsReading] = useState(false);
-            const [showUserModal, setShowUserModal] = useState(false);
-            const [newUser, setNewUser] = useState({ id: '', name: '', password: '', role: 'user', photo: null });
+            const [isRecording, setIsRecording] = useState(false);
+            const [transcript, setTranscript] = useState("System online. 'Read Now' par click karein...");
 
+            const canvasRef = useRef(null);
+            const fileInputRef = useRef(null);
+
+            // Re-render icons on page change
+            useEffect(() => { 
+                lucide.createIcons(); 
+            }, [currentPage, user, activePdf, isReading, isRecording, isSidebarCollapsed, pdfs]);
+
+            // PDF Engine
             useEffect(() => {
-                lucide.createIcons();
-            }, [currentPage, isSidebarCollapsed, user, showUserModal, pdfs, users, isReading, activePdf]);
-
-            const handleLogin = (e) => {
-                e.preventDefault();
-                if (loginData.username === 'admin' && loginData.password === 'admin') {
-                    setUser({ role: 'admin', name: 'Admin Saheb', id: 'admin', photo: null });
-                    setCurrentPage('dashboard');
-                } else {
-                    const foundUser = users.find(u => u.id === loginData.username && u.password === loginData.password);
-                    if (foundUser) {
-                        setUser(foundUser);
-                        setCurrentPage('reader-list');
-                    } else {
-                        alert('Galat ID ya Password!');
-                    }
+                if (activePdf && canvasRef.current && currentPage === 'reader') {
+                    const render = async () => {
+                        const loadingTask = pdfjsLib.getDocument(activePdf.url);
+                        const pdf = await loadingTask.promise;
+                        setNumPages(pdf.numPages);
+                        const page = await pdf.getPage(pdfPage);
+                        const viewport = page.getViewport({ scale: zoom });
+                        const canvas = canvasRef.current;
+                        const context = canvas.getContext('2d');
+                        canvas.height = viewport.height;
+                        canvas.width = viewport.width;
+                        await page.render({ canvasContext: context, viewport }).promise;
+                    };
+                    render();
                 }
-            };
-
-            const handleLogout = () => {
-                setUser(null);
-                setLoginData({ username: '', password: '' }); // Form clean
-                setCurrentPage('login');
-                setIsReading(false);
-                setActivePdf(null);
-            };
+            }, [activePdf, pdfPage, zoom, currentPage]);
 
             const handleFileUpload = (e) => {
                 const file = e.target.files[0];
                 if (file) {
-                    const reader = new FileReader();
-                    reader.onload = (event) => {
-                        const newPdf = { id: Date.now(), title: file.name, url: event.target.result };
-                        setPdfs([...pdfs, newPdf]);
-                    };
-                    reader.readAsDataURL(file);
+                    const url = URL.createObjectURL(file);
+                    const newPdf = { id: Date.now(), title: file.name, url };
+                    setPdfs(prev => [...prev, newPdf]);
+                    alert("PDF Safalta purvak upload ho gayi!");
                 }
             };
 
-            const saveConfig = () => {
-                alert("Settings Save ho gayi hain!");
-                setCurrentPage('dashboard');
-            };
+            const triggerFile = () => { if(fileInputRef.current) fileInputRef.current.click(); };
 
-            const NavItem = ({ icon: Icon, label, onClick, active }) => (
-                <button onClick={onClick} className={`w-full flex items-center gap-4 px-6 py-3 transition ${active ? 'bg-blue-600 text-white' : 'text-gray-400 hover:bg-gray-800'}`}>
-                    <Icon />
-                    {!isSidebarCollapsed && <span className="text-sm font-medium">{label}</span>}
-                </button>
-            );
+            const handleLogin = (e) => {
+                e.preventDefault();
+                const id = e.target.uid.value;
+                const pw = e.target.pass.value;
+                if(id === 'admin' && pw === 'admin') {
+                    setUser({role:'admin', name:'Super Admin'});
+                    setCurrentPage('dashboard');
+                } else {
+                    const found = users.find(u => u.id === id && u.password === pw);
+                    if(found) { setUser(found); setCurrentPage('reader-list'); }
+                    else alert("Galat Details!");
+                }
+            };
 
             if (currentPage === 'login') {
                 return (
-                    <div className="min-h-screen bg-gray-950 flex items-center justify-center p-4">
-                        <form onSubmit={handleLogin} className="bg-gray-900 border border-gray-800 p-8 rounded-3xl w-full max-w-md shadow-2xl">
-                            <div className="text-center mb-8">
-                                <div className="inline-block p-4 bg-blue-600/20 rounded-full mb-4 text-blue-500"><Icons.FileText /></div>
-                                <h2 className="text-2xl font-bold text-white">Shuru Karein</h2>
-                                <p className="text-gray-500 text-sm mt-1">Apne account mein login karein</p>
+                    <div className="min-h-screen flex items-center justify-center bg-[#020617] p-4">
+                        <div className="bg-slate-900/50 border border-slate-800 p-12 rounded-[3rem] w-full max-w-md shadow-2xl backdrop-blur-md">
+                            <div className="flex justify-center mb-10">
+                                <div className="w-20 h-20 bg-blue-600 rounded-[2rem] flex items-center justify-center shadow-2xl shadow-blue-500/40"><Icon name="cpu" className="w-10 h-10" /></div>
                             </div>
-                            <div className="space-y-4">
-                                <input type="text" value={loginData.username} onChange={(e) => setLoginData({...loginData, username: e.target.value})} placeholder="Username" className="w-full bg-gray-800 border border-gray-700 p-4 rounded-xl text-white outline-none focus:ring-2 ring-blue-500" required autoComplete="off"/>
-                                <input type="password" value={loginData.password} onChange={(e) => setLoginData({...loginData, password: e.target.value})} placeholder="Password" className="w-full bg-gray-800 border border-gray-700 p-4 rounded-xl text-white outline-none focus:ring-2 ring-blue-500" required autoComplete="off"/>
-                                <button className="w-full bg-blue-600 py-4 rounded-xl text-white font-bold hover:bg-blue-700 transition-all shadow-lg shadow-blue-500/20">Login</button>
-                            </div>
-                        </form>
+                            <h1 className="text-3xl font-black text-center mb-1 tracking-tighter">AI VOICE PRO</h1>
+                            <p className="text-slate-500 text-center mb-8 text-sm">Prabandhak aur Paathak Dashboard</p>
+                            <form className="space-y-4" onSubmit={handleLogin}>
+                                <input name="uid" placeholder="Login ID" className="w-full bg-slate-800/50 border border-slate-700 p-5 rounded-2xl outline-none focus:border-blue-500 transition-all font-bold" required />
+                                <input name="pass" type="password" placeholder="Password" className="w-full bg-slate-800/50 border border-slate-700 p-5 rounded-2xl outline-none focus:border-blue-500 transition-all font-bold" required />
+                                <button className="w-full bg-blue-600 py-5 rounded-2xl font-black uppercase tracking-widest text-xs hover:bg-blue-700 active:scale-95 transition-all shadow-xl shadow-blue-500/20 mt-4">Login Karein</button>
+                            </form>
+                        </div>
                     </div>
                 );
             }
 
             return (
-                <div className={`flex min-h-screen ${isDarkMode ? 'bg-gray-950 text-white' : 'bg-gray-50 text-gray-900'}`}>
+                <div className="flex h-screen overflow-hidden">
                     {/* Sidebar */}
-                    <aside className={`${isSidebarCollapsed ? 'w-20' : 'w-64'} transition-all bg-gray-900 text-white flex flex-col border-r border-gray-800 z-40`}>
-                        <div className="p-4 flex items-center justify-between border-b border-gray-800 h-16">
-                            {!isSidebarCollapsed && <h1 className="font-black text-xl text-blue-500">PDF AI</h1>}
-                            <button onClick={() => setIsSidebarCollapsed(!isSidebarCollapsed)} className="p-2 hover:bg-gray-800 rounded-lg transition"><Icons.Menu /></button>
+                    <aside className={`${isSidebarCollapsed ? 'w-24' : 'w-72'} bg-slate-900/80 border-r border-slate-800 transition-all duration-300 flex flex-col z-50 glass-panel`}>
+                        <div className="h-24 flex items-center px-8 border-b border-slate-800 gap-4">
+                            <div className="min-w-[40px] h-10 bg-blue-600 rounded-xl flex items-center justify-center"><Icon name="zap" /></div>
+                            {!isSidebarCollapsed && <span className="font-black text-xl tracking-tighter">AI ADMIN</span>}
                         </div>
-                        <nav className="flex-1 mt-6">
-                            <NavItem icon={Icons.FileText} label="Dashboard" onClick={() => {setCurrentPage(user.role === 'admin' ? 'dashboard' : 'reader-list'); setIsReading(false);}} active={currentPage === 'dashboard' || currentPage === 'reader-list'} />
-                            {user.role === 'admin' && <NavItem icon={Icons.Users} label="Users Control" onClick={() => {setCurrentPage('manage-users'); setIsReading(false);}} active={currentPage === 'manage-users'} />}
-                            {user.role === 'admin' && <NavItem icon={Icons.Settings} label="AI Settings" onClick={() => {setCurrentPage('settings'); setIsReading(false);}} active={currentPage === 'settings'} />}
+                        <nav className="flex-1 p-4 space-y-2 mt-4">
+                            <button onClick={() => setCurrentPage(user.role === 'admin' ? 'dashboard' : 'reader-list')} className={`w-full flex items-center gap-4 p-4 rounded-2xl transition-all ${currentPage === 'dashboard' || currentPage === 'reader-list' ? 'bg-blue-600 shadow-lg' : 'hover:bg-slate-800/50 text-slate-400'}`}>
+                                <Icon name="layout" /> {!isSidebarCollapsed && <span className="font-bold text-sm">Library</span>}
+                            </button>
+                            {user.role === 'admin' && (
+                                <>
+                                    <button onClick={() => setCurrentPage('users')} className={`w-full flex items-center gap-4 p-4 rounded-2xl transition-all ${currentPage === 'users' ? 'bg-blue-600 shadow-lg' : 'hover:bg-slate-800/50 text-slate-400'}`}>
+                                        <Icon name="users" /> {!isSidebarCollapsed && <span className="font-bold text-sm">Manage Users</span>}
+                                    </button>
+                                    <button onClick={() => setCurrentPage('settings')} className={`w-full flex items-center gap-4 p-4 rounded-2xl transition-all ${currentPage === 'settings' ? 'bg-blue-600 shadow-lg' : 'hover:bg-slate-800/50 text-slate-400'}`}>
+                                        <Icon name="sliders" /> {!isSidebarCollapsed && <span className="font-bold text-sm">API Settings</span>}
+                                    </button>
+                                </>
+                            )}
                         </nav>
-                        <div className="p-4 border-t border-gray-800">
-                            <div className="mb-4 flex items-center gap-3">
-                                <div className="w-10 h-10 rounded-full bg-gray-800 flex items-center justify-center overflow-hidden border border-gray-700">
-                                    {user.photo ? <img src={user.photo} className="w-full h-full object-cover"/> : <Icons.User />}
-                                </div>
-                                {!isSidebarCollapsed && <div className="truncate"><p className="text-xs font-bold">{user.name}</p><p className="text-[10px] text-blue-500 uppercase">{user.role}</p></div>}
-                            </div>
-                            <button onClick={handleLogout} className="flex items-center gap-3 text-red-400 p-3 w-full hover:bg-red-500/10 rounded-xl transition font-bold"><Icons.LogOut /> {!isSidebarCollapsed && 'Logout'}</button>
-                        </div>
+                        <button onClick={() => window.location.reload()} className="m-6 p-4 bg-red-500/10 text-red-500 rounded-2xl font-black text-[10px] uppercase tracking-[0.2em] hover:bg-red-500 hover:text-white transition-all flex items-center justify-center gap-2"><Icon name="log-out" className="w-4 h-4" /> {!isSidebarCollapsed && 'Sign Out'}</button>
                     </aside>
 
-                    <main className="flex-1 flex flex-col h-screen overflow-hidden">
-                        <header className="h-16 border-b border-gray-800 flex items-center justify-between px-8 bg-gray-900/50 backdrop-blur-md">
+                    <main className="flex-1 flex flex-col min-w-0 bg-[#020617]">
+                        {/* Header */}
+                        <header className="h-24 border-b border-slate-800 flex items-center justify-between px-10 glass-panel z-40">
                             <div className="flex items-center gap-4">
-                                {currentPage === 'reader' && <button onClick={() => {setCurrentPage(user.role === 'admin' ? 'dashboard' : 'reader-list'); setIsReading(false);}} className="p-2 hover:bg-gray-800 rounded-full transition"><Icons.ArrowLeft /></button>}
-                                <h2 className="font-bold text-lg tracking-tight">{currentPage.toUpperCase().replace('-', ' ')}</h2>
+                                {currentPage === 'reader' && <button onClick={() => setCurrentPage(user.role === 'admin' ? 'dashboard' : 'reader-list')} className="p-3 bg-slate-800 rounded-xl hover:bg-blue-600 transition-all"><Icon name="arrow-left" /></button>}
+                                <h2 className="text-[10px] font-black uppercase tracking-[0.4em] text-slate-500">{currentPage.replace('-',' ')}</h2>
                             </div>
-                            <button onClick={() => setIsDarkMode(!isDarkMode)} className="p-2 hover:bg-gray-800 rounded-full transition">{isDarkMode ? <Icons.Sun /> : <Icons.Moon />}</button>
+                            <div className="flex items-center gap-6">
+                                <div className="text-right hidden sm:block">
+                                    <p className="text-xs font-black">{user.name}</p>
+                                    <p className="text-[10px] text-blue-500 font-bold uppercase tracking-widest">{user.role}</p>
+                                </div>
+                                <div className="w-12 h-12 bg-slate-800 border border-slate-700 rounded-2xl flex items-center justify-center text-blue-500 font-black shadow-inner">{user.name[0]}</div>
+                            </div>
                         </header>
 
-                        <div className="flex-1 overflow-auto p-6 custom-scrollbar">
-                            {/* Reader View */}
-                            {currentPage === 'reader' && (
-                                <div className="h-full flex flex-col gap-4 max-w-5xl mx-auto">
-                                    <div className="bg-gray-900 p-4 rounded-2xl flex items-center justify-between border border-gray-800 shadow-xl">
-                                        <div className="flex items-center gap-2">
-                                            <button onClick={() => { setIsReading(false); setPdfPage(p => Math.max(1, p-1)); }} className="bg-gray-800 p-3 rounded-xl hover:bg-gray-700 transition"><Icons.ChevronLeft /></button>
-                                            <div className="px-6 py-2 bg-gray-800 rounded-xl border border-gray-700 min-w-[80px] text-center">
-                                                <span className="text-blue-500 font-black text-xl">{pdfPage}</span>
+                        {/* Content Area */}
+                        <div className="flex-1 overflow-auto p-10 custom-scroll">
+                            
+                            {/* --- SETTINGS VIEW --- */}
+                            {currentPage === 'settings' && (
+                                <div className="max-w-2xl mx-auto py-4">
+                                    <div className="bg-slate-900 border border-slate-800 p-12 rounded-[3.5rem] shadow-2xl">
+                                        <div className="flex items-center gap-6 mb-10">
+                                            <div className="w-16 h-16 bg-blue-600/10 text-blue-500 rounded-2xl flex items-center justify-center text-2xl border border-blue-500/20"><Icon name="settings" className="w-8 h-8" /></div>
+                                            <div>
+                                                <h3 className="text-3xl font-black">AI Config</h3>
+                                                <p className="text-slate-500 text-sm">Gemini API Key yahan set karein</p>
                                             </div>
-                                            <button onClick={() => { setIsReading(false); setPdfPage(p => p+1); }} className="bg-gray-800 p-3 rounded-xl hover:bg-gray-700 transition"><Icons.ChevronRight /></button>
                                         </div>
-
-                                        {isReading && (
-                                            <div className="flex-1 px-4 flex items-center justify-center">
-                                                <div className="bg-blue-600/10 text-blue-400 px-4 py-2 rounded-full border border-blue-500/20 flex items-center gap-2 playing-indicator">
-                                                    <Icons.Volume2 />
-                                                    <span className="text-xs font-bold uppercase tracking-widest">AI Reading Page {pdfPage}</span>
-                                                </div>
+                                        <div className="space-y-8">
+                                            <div>
+                                                <label className="text-[10px] font-black uppercase text-slate-500 tracking-widest mb-3 block">Google Gemini API Key</label>
+                                                <input type="password" value={apiConfig.key} onChange={e => setApiConfig({...apiConfig, key: e.target.value})} placeholder="AI Key Paste Karein..." className="w-full bg-slate-950 p-6 rounded-2xl outline-none border border-slate-800 focus:border-blue-500 transition-all font-mono" />
                                             </div>
-                                        )}
-
-                                        <div className="flex items-center gap-3">
-                                            <button 
-                                                onClick={() => setIsReading(!isReading)} 
-                                                className={`p-4 rounded-full transition-all active:scale-90 shadow-lg ${isReading ? 'bg-red-500' : 'bg-blue-600 animate-pulse'}`}
-                                            >
-                                                {isReading ? <Icons.Square /> : <Icons.Play />}
-                                            </button>
-                                            <select className="bg-gray-800 p-3 rounded-xl text-sm border border-gray-700 outline-none cursor-pointer text-white">
-                                                <option>Hindi Male Voice</option>
-                                                <option>Hindi Female Voice</option>
-                                            </select>
+                                            <div>
+                                                <label className="text-[10px] font-black uppercase text-slate-500 tracking-widest mb-3 block">Model Select Karein</label>
+                                                <select value={apiConfig.model} onChange={e => setApiConfig({...apiConfig, model: e.target.value})} className="w-full bg-slate-950 p-6 rounded-2xl outline-none border border-slate-800 focus:border-blue-500 appearance-none font-bold text-sm">
+                                                    <option value="gemini-1.5-pro">Gemini 1.5 Pro (Accuracy)</option>
+                                                    <option value="gemini-1.5-flash">Gemini 1.5 Flash (Speed)</option>
+                                                </select>
+                                            </div>
+                                            <button onClick={() => alert("Settings Saved!")} className="w-full bg-blue-600 py-6 rounded-2xl font-black uppercase tracking-widest text-xs shadow-xl shadow-blue-500/20 hover:bg-blue-700 transition-all active:scale-95">Configuration Save Karein</button>
                                         </div>
-                                    </div>
-
-                                    <div className="pdf-viewer-area shadow-2xl border border-gray-800">
-                                        {activePdf ? (
-                                            <iframe 
-                                                src={`${activePdf.url}#page=${pdfPage}&view=FitH&toolbar=0`} 
-                                                key={`${activePdf.id}-${pdfPage}`}
-                                                title="pdf-frame"
-                                            ></iframe>
-                                        ) : (
-                                            <div className="h-full flex flex-col items-center justify-center gap-4 text-gray-600">
-                                                <Icons.Loader />
-                                                <p className="font-bold uppercase tracking-widest text-xs">PDF taiyar ho raha hai...</p>
-                                            </div>
-                                        )}
                                     </div>
                                 </div>
                             )}
 
-                            {/* Dashboard / PDF List */}
+                            {/* --- READER VIEW --- */}
+                            {currentPage === 'reader' && (
+                                <div className="h-full flex flex-col gap-6 max-w-7xl mx-auto">
+                                    <div className="bg-slate-900 border border-slate-800 p-6 rounded-[2.5rem] flex flex-wrap items-center justify-between shadow-2xl gap-4">
+                                        <div className="flex items-center gap-4">
+                                            <button onClick={() => setPdfPage(p => Math.max(1, p-1))} className="p-4 bg-slate-800 rounded-2xl hover:bg-blue-600 transition-all"><Icon name="chevron-left" /></button>
+                                            <div className="px-6 py-2 bg-slate-950 border border-slate-800 rounded-xl font-black text-lg">
+                                                {pdfPage} <span className="text-slate-600 mx-1">/</span> {numPages}
+                                            </div>
+                                            <button onClick={() => setPdfPage(p => Math.min(numPages, p+1))} className="p-4 bg-slate-800 rounded-2xl hover:bg-blue-600 transition-all"><Icon name="chevron-right" /></button>
+                                            <div className="h-10 w-[1px] bg-slate-800 mx-2"></div>
+                                            <div className="flex items-center gap-2 bg-slate-950 p-2 rounded-xl">
+                                                <button onClick={() => setZoom(z => Math.max(0.5, z-0.2))} className="w-10 h-10 hover:bg-slate-800 rounded-lg font-black">-</button>
+                                                <span className="text-[10px] font-black w-12 text-center">{Math.round(zoom*100)}%</span>
+                                                <button onClick={() => setZoom(z => Math.min(4, z+0.2))} className="w-10 h-10 hover:bg-slate-800 rounded-lg font-black">+</button>
+                                            </div>
+                                        </div>
+                                        <div className="flex items-center gap-3">
+                                            <button onClick={() => setIsRecording(!isRecording)} className={`p-5 rounded-2xl transition-all shadow-xl ${isRecording ? 'bg-red-600 animate-pulse text-white' : 'bg-slate-800 text-slate-500 hover:text-white'}`}><Icon name="mic" /></button>
+                                            <button onClick={() => setIsReading(!isReading)} className={`flex items-center gap-3 px-8 py-5 rounded-2xl font-black text-xs uppercase tracking-widest transition-all active:scale-95 shadow-2xl ${isReading ? 'bg-red-500' : 'bg-blue-600 hover:bg-blue-700'}`}>
+                                                {isReading ? <><Icon name="square" /> Stop</> : <><Icon name="play" /> Read Now</>}
+                                            </button>
+                                            <div className="relative group">
+                                                <button className="p-5 bg-slate-800 rounded-2xl hover:bg-slate-700 transition-all"><Icon name="download" /></button>
+                                                <div className="hidden group-hover:block absolute right-0 top-full mt-2 w-40 bg-slate-900 border border-slate-700 rounded-2xl overflow-hidden shadow-2xl z-50">
+                                                    <button className="w-full px-5 py-4 hover:bg-blue-600 text-[10px] font-black uppercase text-left border-b border-slate-800">Export WAV</button>
+                                                    <button className="w-full px-5 py-4 hover:bg-blue-600 text-[10px] font-black uppercase text-left">Export MP3</button>
+                                                </div>
+                                            </div>
+                                        </div>
+                                    </div>
+
+                                    <div className="flex-1 flex gap-8 overflow-hidden">
+                                        <div className="pdf-view-area custom-scroll">
+                                            <canvas ref={canvasRef}></canvas>
+                                        </div>
+                                        <div className="w-96 bg-slate-900/50 border border-slate-800 rounded-[3rem] p-10 flex flex-col shadow-2xl backdrop-blur-md">
+                                            <h3 className="text-[10px] font-black text-blue-500 uppercase tracking-widest mb-8 flex items-center gap-2"><div className="w-2 h-2 bg-blue-500 rounded-full animate-ping"></div> Live Transcription</h3>
+                                            <div className="flex-1 overflow-auto custom-scroll space-y-6 pr-2">
+                                                <div className={`p-10 rounded-[2.5rem] text-2xl font-bold leading-relaxed transition-all duration-500 ${isReading ? 'active-glow text-white' : 'opacity-20'}`}>
+                                                    {transcript}
+                                                </div>
+                                                <div className="p-6 text-[10px] text-slate-600 font-black uppercase tracking-widest border-t border-slate-800 pt-10">System Listening Mode: Active</div>
+                                            </div>
+                                        </div>
+                                    </div>
+                                </div>
+                            )}
+
+                            {/* --- PDF LIST VIEW (Dashboard) --- */}
                             {(currentPage === 'dashboard' || currentPage === 'reader-list') && (
-                                <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-6">
-                                    {user.role === 'admin' && currentPage === 'dashboard' && (
-                                        <div className="bg-gray-900 border-2 border-dashed border-gray-800 p-8 rounded-3xl flex flex-col items-center justify-center hover:border-blue-500 hover:bg-blue-500/5 transition-all cursor-pointer relative group overflow-hidden h-64">
-                                            <input type="file" accept=".pdf" onChange={handleFileUpload} className="absolute inset-0 opacity-0 cursor-pointer z-10" />
-                                            <div className="p-4 bg-blue-600/10 rounded-2xl text-blue-500 group-hover:scale-110 transition-transform"><Icons.Plus /></div>
-                                            <p className="mt-4 font-bold text-sm">Upload Naya PDF</p>
+                                <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-8">
+                                    {user.role === 'admin' && (
+                                        <div onClick={triggerFile} className="bg-slate-900 border-4 border-dashed border-slate-800 rounded-[3rem] p-12 flex flex-col items-center justify-center hover:border-blue-600 hover:bg-blue-600/5 transition-all group cursor-pointer relative min-h-[22rem] shadow-xl">
+                                            <input type="file" ref={fileInputRef} accept=".pdf" onChange={handleFileUpload} className="hidden" />
+                                            <div className="w-20 h-20 bg-blue-600/10 text-blue-500 rounded-[2rem] flex items-center justify-center mb-6 group-hover:scale-110 group-hover:bg-blue-600 group-hover:text-white transition-all shadow-xl"><Icon name="plus" className="w-10 h-10" /></div>
+                                            <p className="font-black uppercase text-[10px] tracking-[0.3em] text-slate-500 group-hover:text-blue-500">Nayi PDF Add Karein</p>
                                         </div>
                                     )}
                                     {pdfs.filter(p => user.role === 'admin' || user.allowedPdfs.includes(p.id)).map(p => (
-                                        <div key={p.id} className="bg-gray-900 p-5 rounded-3xl border border-gray-800 hover:border-blue-500/50 transition-all shadow-xl group h-64 flex flex-col justify-between">
-                                            <div className="flex justify-between items-start mb-4">
-                                                <div className="p-3 bg-red-500/10 rounded-2xl text-red-500"><Icons.FileText /></div>
-                                                {user.role === 'admin' && <button onClick={() => setPdfs(pdfs.filter(x => x.id !== p.id))} className="text-gray-600 hover:text-red-500 p-2 transition opacity-0 group-hover:opacity-100"><Icons.Trash2 /></button>}
+                                        <div key={p.id} className="bg-slate-900 border border-slate-800 p-10 rounded-[3rem] flex flex-col justify-between min-h-[22rem] hover:border-blue-500/50 hover:-translate-y-2 transition-all group shadow-2xl relative overflow-hidden">
+                                            <div className="flex justify-between items-start z-10">
+                                                <div className="w-16 h-16 bg-red-500/10 text-red-500 rounded-2xl flex items-center justify-center shadow-lg border border-red-500/10"><Icon name="file-text" className="w-8 h-8" /></div>
+                                                {user.role === 'admin' && <button onClick={() => setPdfs(pdfs.filter(x => x.id !== p.id))} className="opacity-0 group-hover:opacity-100 p-3 bg-slate-800 text-slate-600 hover:text-red-500 rounded-xl transition-all"><Icon name="trash-2" /></button>}
                                             </div>
-                                            <div>
-                                                <p className="font-bold text-lg truncate mb-1">{p.title}</p>
-                                                <p className="text-[10px] text-gray-500 mb-6 uppercase tracking-widest font-black">PDF Document</p>
+                                            <div className="mt-8 z-10">
+                                                <h3 className="font-black text-2xl truncate mb-2 leading-tight">{p.title}</h3>
+                                                <p className="text-[10px] text-slate-600 uppercase font-black tracking-[0.2em]">Ready for AI Analysis</p>
                                             </div>
-                                            <button onClick={() => { setActivePdf(p); setPdfPage(1); setCurrentPage('reader'); }} className="w-full bg-blue-600 hover:bg-blue-700 text-white py-4 rounded-2xl font-bold transition shadow-lg shadow-blue-500/10 active:scale-95">Abhi Padhein</button>
+                                            <button onClick={() => {setActivePdf(p); setPdfPage(1); setCurrentPage('reader');}} className="w-full bg-slate-800 py-6 rounded-2xl font-black text-xs uppercase tracking-widest hover:bg-blue-600 transition-all shadow-xl mt-8 active:scale-95 z-10">Abhi Padhein</button>
                                         </div>
                                     ))}
                                 </div>
                             )}
 
-                            {/* AI Settings Page */}
-                            {currentPage === 'settings' && user.role === 'admin' && (
-                                <div className="max-w-2xl mx-auto py-6">
-                                    <div className="bg-gray-900 p-10 rounded-[40px] border border-gray-800 shadow-2xl relative overflow-hidden">
-                                        <div className="flex items-center gap-4 mb-10">
-                                            <div className="p-4 bg-blue-600/10 rounded-2xl text-blue-500"><Icons.Key /></div>
-                                            <div>
-                                                <h3 className="text-2xl font-black text-white">AI Configuration</h3>
-                                                <p className="text-gray-500 text-xs font-bold uppercase tracking-widest mt-1">Setup Gemini AI</p>
-                                            </div>
-                                        </div>
-                                        <div className="space-y-8">
-                                            <div className="space-y-3">
-                                                <label className="text-xs font-black text-gray-400 uppercase tracking-widest ml-1">Gemini API Key</label>
-                                                <input type="password" value={config.apiKey} onChange={(e) => setConfig({...config, apiKey: e.target.value})} placeholder="Key yahan paste karein..." className="w-full bg-gray-800 border border-gray-700 p-5 rounded-2xl text-white outline-none focus:ring-2 ring-blue-500 transition-all font-mono" />
-                                            </div>
-                                            <div className="space-y-3">
-                                                <label className="text-xs font-black text-gray-400 uppercase tracking-widest ml-1">AI Model Choose Karein</label>
-                                                <div className="relative">
-                                                    <div className="absolute left-5 top-1/2 -translate-y-1/2 text-blue-500"><Icons.Cpu /></div>
-                                                    <select value={config.selectedModel} onChange={(e) => setConfig({...config, selectedModel: e.target.value})} className="w-full bg-gray-800 border border-gray-700 p-5 pl-14 rounded-2xl text-white outline-none focus:ring-2 ring-blue-500 transition-all appearance-none cursor-pointer">
-                                                        <option>Gemini 1.5 Flash (Tez)</option>
-                                                        <option>Gemini 1.5 Pro (Advance)</option>
-                                                        <option>Gemini 2.0 Experimental</option>
-                                                    </select>
-                                                </div>
-                                            </div>
-                                            <button onClick={saveConfig} className="w-full bg-blue-600 hover:bg-blue-700 py-5 rounded-2xl font-black text-white flex items-center justify-center gap-3 transition shadow-xl shadow-blue-500/20 uppercase tracking-widest active:scale-95"><Icons.Save /> Save Configuration</button>
-                                        </div>
+                            {/* --- USERS VIEW --- */}
+                            {currentPage === 'users' && (
+                                <div className="max-w-5xl mx-auto space-y-8">
+                                    <div className="bg-slate-900 p-10 rounded-[3rem] border border-slate-800 flex justify-between items-center shadow-xl backdrop-blur-md">
+                                        <div><h3 className="text-3xl font-black">Members Control</h3><p className="text-slate-500 text-sm">Access aur permissions manage karein</p></div>
+                                        <button onClick={() => {
+                                            const id = prompt('Username:');
+                                            const name = prompt('Name:');
+                                            const pass = prompt('Password:');
+                                            if(id && name && pass) setUsers([...users, {id, name, password:pass, role:'user', allowedPdfs:[]}]);
+                                        }} className="bg-blue-600 px-8 py-5 rounded-2xl font-black text-xs uppercase tracking-widest flex items-center gap-3 shadow-lg active:scale-95 transition-all"><Icon name="plus" /> Add User</button>
                                     </div>
-                                </div>
-                            )}
-
-                            {/* User Management Page */}
-                            {currentPage === 'manage-users' && user.role === 'admin' && (
-                                <div className="space-y-6">
-                                    <div className="flex justify-between items-center bg-gray-900/40 p-4 rounded-2xl">
-                                        <h3 className="text-xl font-bold flex items-center gap-2 text-blue-400"><Icons.Users /> Manage Users</h3>
-                                        <button onClick={() => setShowUserModal(true)} className="bg-blue-600 hover:bg-blue-700 px-6 py-3 rounded-2xl flex items-center gap-2 font-bold shadow-lg transition active:scale-95"><Icons.Plus /> Naya User</button>
-                                    </div>
-                                    <div className="bg-gray-900 rounded-3xl border border-gray-800 overflow-hidden shadow-2xl">
+                                    <div className="bg-slate-900 border border-slate-800 rounded-[3rem] overflow-hidden shadow-2xl">
                                         <table className="w-full text-left">
-                                            <thead className="bg-gray-800 text-gray-400 text-[10px] uppercase font-black tracking-widest">
-                                                <tr>
-                                                    <th className="px-6 py-6">Profile</th>
-                                                    <th className="px-6 py-6">PDF Access</th>
-                                                    <th className="px-6 py-6 text-center">Action</th>
-                                                </tr>
+                                            <thead className="bg-slate-800/50 text-[10px] font-black uppercase text-slate-500 tracking-widest border-b border-slate-800">
+                                                <tr><th className="px-10 py-6">Member</th><th className="px-10 py-6">Access</th><th className="px-10 py-6 text-right">Remove</th></tr>
                                             </thead>
-                                            <tbody className="divide-y divide-gray-800">
+                                            <tbody className="divide-y divide-slate-800">
                                                 {users.map(u => (
-                                                    <tr key={u.id} className="hover:bg-gray-800/10 transition">
-                                                        <td className="px-6 py-5">
-                                                            <div className="flex items-center gap-4">
-                                                                <div className="w-12 h-12 bg-gray-800 rounded-full border border-gray-700 flex items-center justify-center overflow-hidden">
-                                                                    {u.photo ? <img src={u.photo} className="w-full h-full object-cover" /> : <Icons.User />}
-                                                                </div>
-                                                                <div>
-                                                                    <p className="font-bold text-md">{u.name}</p>
-                                                                    <p className="text-[10px] text-gray-500 font-mono">ID: {u.id} | PW: {u.password}</p>
-                                                                </div>
+                                                    <tr key={u.id} className="hover:bg-blue-500/[0.02] transition-all">
+                                                        <td className="px-10 py-8">
+                                                            <div className="flex items-center gap-5">
+                                                                <div className="w-14 h-14 bg-slate-800 rounded-2xl flex items-center justify-center border border-slate-700 text-blue-500"><Icon name="user" /></div>
+                                                                <div><p className="font-black text-lg">{u.name}</p><p className="text-[10px] text-slate-500 font-mono">ID: {u.id} | PW: {u.password}</p></div>
                                                             </div>
                                                         </td>
-                                                        <td className="px-6 py-5">
+                                                        <td className="px-10 py-8">
                                                             <div className="flex flex-wrap gap-2">
-                                                                {pdfs.map(pdf => (
-                                                                    <button 
-                                                                        key={pdf.id} 
-                                                                        onClick={() => setUsers(users.map(us => us.id === u.id ? {...us, allowedPdfs: us.allowedPdfs.includes(pdf.id) ? us.allowedPdfs.filter(i => i !== pdf.id) : [...us.allowedPdfs, pdf.id]} : us))} 
-                                                                        className={`px-3 py-1.5 rounded-xl text-[10px] font-black border transition ${u.allowedPdfs.includes(pdf.id) ? 'bg-green-500/10 border-green-500/40 text-green-500' : 'bg-gray-800 border-transparent text-gray-500 hover:border-gray-600'}`}
-                                                                    >
-                                                                        {pdf.title.substring(0,12)}
-                                                                    </button>
+                                                                {pdfs.map(p => (
+                                                                    <button key={p.id} onClick={() => {
+                                                                        const isAllowed = u.allowedPdfs.includes(p.id);
+                                                                        setUsers(users.map(x => x.id === u.id ? {...x, allowedPdfs: isAllowed ? x.allowedPdfs.filter(pid => pid !== p.id) : [...x.allowedPdfs, p.id]} : x));
+                                                                    }} className={`px-4 py-2 rounded-xl text-[10px] font-black border transition-all ${u.allowedPdfs.includes(p.id) ? 'bg-blue-600 border-blue-600' : 'bg-slate-800 border-slate-700 text-slate-500'}`}>{p.title}</button>
                                                                 ))}
                                                             </div>
                                                         </td>
-                                                        <td className="px-6 py-5 text-center">
-                                                            <button onClick={() => setUsers(users.filter(x => x.id !== u.id))} className="text-red-500 hover:bg-red-500/10 p-3 rounded-2xl transition"><Icons.Trash2 /></button>
-                                                        </td>
+                                                        <td className="px-10 py-8 text-right"><button onClick={() => setUsers(users.filter(x => x.id !== u.id))} className="w-12 h-12 flex items-center justify-center text-slate-600 hover:text-red-500 hover:bg-red-500/10 rounded-2xl transition-all"><Icon name="trash-2" /></button></td>
                                                     </tr>
                                                 ))}
                                             </tbody>
@@ -343,46 +341,9 @@
                                     </div>
                                 </div>
                             )}
+
                         </div>
                     </main>
-
-                    {/* New User Modal */}
-                    {showUserModal && (
-                        <div className="fixed inset-0 bg-black/90 backdrop-blur-sm flex items-center justify-center p-4 z-[100]">
-                            <div className="bg-gray-900 border border-gray-800 p-8 rounded-[40px] w-full max-w-md shadow-2xl relative">
-                                <button onClick={() => setShowUserModal(false)} className="absolute top-8 right-8 text-gray-500 hover:text-white transition"><Icons.X /></button>
-                                <h3 className="text-2xl font-black mb-10 tracking-tight text-blue-500">Add New User</h3>
-                                <div className="space-y-6">
-                                    <div className="flex justify-center mb-4">
-                                        <div className="relative group">
-                                            <div className="w-24 h-24 bg-gray-800 rounded-full border-2 border-dashed border-gray-700 flex items-center justify-center overflow-hidden text-gray-500">
-                                                {newUser.photo ? <img src={newUser.photo} className="w-full h-full object-cover" /> : <Icons.User />}
-                                            </div>
-                                            <label className="absolute bottom-0 right-0 p-3 bg-blue-600 rounded-full cursor-pointer shadow-lg text-white hover:scale-110 transition-transform">
-                                                <Icons.Camera /><input type="file" className="hidden" onChange={(e) => {
-                                                    const file = e.target.files[0];
-                                                    if(file) {
-                                                        const reader = new FileReader();
-                                                        reader.onload = (ev) => setNewUser({...newUser, photo: ev.target.result});
-                                                        reader.readAsDataURL(file);
-                                                    }
-                                                }} />
-                                            </label>
-                                        </div>
-                                    </div>
-                                    <input placeholder="Poora Naam" className="w-full bg-gray-800 border border-gray-700 p-4 rounded-2xl text-white outline-none" value={newUser.name} onChange={e => setNewUser({...newUser, name: e.target.value})} />
-                                    <input placeholder="Login ID" className="w-full bg-gray-800 border border-gray-700 p-4 rounded-2xl text-white font-mono outline-none" value={newUser.id} onChange={e => setNewUser({...newUser, id: e.target.value})} />
-                                    <input type="password" placeholder="Password Set Karein" className="w-full bg-gray-800 border border-gray-700 p-4 rounded-2xl text-white outline-none" value={newUser.password} onChange={e => setNewUser({...newUser, password: e.target.value})} />
-                                    <button onClick={() => { 
-                                        if(!newUser.id) return;
-                                        setUsers([...users, { ...newUser, allowedPdfs: [] }]); 
-                                        setShowUserModal(false); 
-                                        setNewUser({ id: '', name: '', password: '', role: 'user', photo: null });
-                                    }} className="w-full bg-blue-600 hover:bg-blue-700 py-5 rounded-2xl font-black mt-4 shadow-xl shadow-blue-500/20 transition uppercase tracking-widest active:scale-95">User Create Karein</button>
-                                </div>
-                            </div>
-                        </div>
-                    )}
                 </div>
             );
         }
